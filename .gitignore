@@ -9,3 +9,8 @@ captures/
 .cxx
 *.apk
 *.aab
+build/
+app/build/
+.gradle/
+test_output.txt
+gh_output.txt
