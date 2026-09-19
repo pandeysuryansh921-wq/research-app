@@ -137,12 +137,20 @@ class ResearchRepository(
         Result.success(source.id)
     }
 
+    suspend fun getSourceById(id: String): Source? = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        db.rawQuery("SELECT * FROM ${ResearchDatabase.TABLE_SOURCES} WHERE id = ? LIMIT 1", arrayOf(id)).use { cursor ->
+            if (cursor.moveToFirst()) cursorToSource(cursor) else null
+        }
+    }
+
     suspend fun updateSource(source: Source) = withContext(Dispatchers.IO) {
         val db = dbHelper.writableDatabase
         val cv = ContentValues().apply {
             put("reading_status", source.readingStatus.name)
             put("priority", source.priority)
             put("rationale", source.rationale)
+            put("local_pdf_path", source.localPdfPath)
         }
         db.update(ResearchDatabase.TABLE_SOURCES, cv, "id = ?", arrayOf(source.id))
     }

@@ -29,6 +29,8 @@ fun ProjectWorkspaceScreen(
     onOpenEvidenceBoard: () -> Unit,
     onOpenMatrix: () -> Unit,
     onOpenDiscovery: () -> Unit,
+    onOpenDocument: (Source) -> Unit,
+    onAttachFile: (String) -> Unit,
     onUpdateReadingStatus: (String, ReadingStatus) -> Unit,
     onAddPaperManually: (String, String?, Int?, String?) -> Unit
 ) {
@@ -152,15 +154,8 @@ fun ProjectWorkspaceScreen(
                 items(filteredSources, key = { it.id }) { source ->
                     SourceCard(
                         source = source,
-                        onOpenStylusNotes = {
-                            EcosystemBridge.createOpenInStylusNotesIntent(source.id, pageNumber = 1).let {
-                                try {
-                                    context.startActivity(it)
-                                } catch (e: Exception) {
-                                    // Stylus notes not installed or intent failed
-                                }
-                            }
-                        },
+                        onOpenDocument = { onOpenDocument(source) },
+                        onAttachFile = { onAttachFile(source.id) },
                         onStatusChange = { newStatus ->
                             onUpdateReadingStatus(source.id, newStatus)
                         }
@@ -237,7 +232,8 @@ fun ProjectWorkspaceScreen(
 @Composable
 private fun SourceCard(
     source: Source,
-    onOpenStylusNotes: () -> Unit,
+    onOpenDocument: () -> Unit,
+    onAttachFile: () -> Unit,
     onStatusChange: (ReadingStatus) -> Unit
 ) {
     var expandedMenu by remember { mutableStateOf(false) }
@@ -266,6 +262,14 @@ private fun SourceCard(
                         expanded = expandedMenu,
                         onDismissRequest = { expandedMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(if (source.localPdfPath != null) "Replace Attached File" else "Attach File (PDF/MD)") },
+                            onClick = {
+                                onAttachFile()
+                                expandedMenu = false
+                            }
+                        )
+                        HorizontalDivider()
                         ReadingStatus.values().forEach { status ->
                             DropdownMenuItem(
                                 text = { Text("Mark as ${status.name.replace('_', ' ')}") },
@@ -314,13 +318,24 @@ private fun SourceCard(
                     ProvenanceBadge(provenance = source.provenance)
                 }
 
-                OutlinedButton(
-                    onClick = onOpenStylusNotes,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Stylus Notes", fontSize = 12.sp)
+                if (source.localPdfPath != null) {
+                    Button(
+                        onClick = onOpenDocument,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Read Paper", fontSize = 12.sp)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onAttachFile,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Attach File", fontSize = 12.sp)
+                    }
                 }
             }
         }

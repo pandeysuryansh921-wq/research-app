@@ -17,6 +17,9 @@ import com.ecosystem.research.core.model.*
 import com.ecosystem.research.core.network.DiscoveryClient
 import com.ecosystem.research.core.repository.ResearchRepository
 import com.ecosystem.research.ui.screens.*
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.ecosystem.research.ui.theme.ResearchTheme
 import kotlinx.coroutines.launch
 
@@ -25,6 +28,12 @@ sealed class Screen {
     data class ProjectWorkspace(val projectId: String) : Screen()
     data class EvidenceBoard(val projectId: String) : Screen()
     data class EvidenceMatrixView(val projectId: String, val matrixId: String) : Screen()
+    data class DocumentViewer(
+        val sourceId: String?,
+        val fileUriOrPath: String,
+        val title: String,
+        val projectId: String?
+    ) : Screen()
     object UniversalInbox : Screen()
     object PaperDiscovery : Screen()
 }
@@ -54,6 +63,43 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var currentScreen by remember { mutableStateOf<Screen>(Screen.Dashboard) }
+                    var pendingAttachSourceId by remember { mutableStateOf<String?>(null) }
+
+                    val filePickerLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.OpenDocument()
+                    ) { uri: Uri? ->
+                        if (uri != null) {
+                            try {
+                                contentResolver.takePersistableUriPermission(
+                                    uri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                )
+                            } catch (_: Exception) {}
+
+                            val sId = pendingAttachSourceId
+                            pendingAttachSourceId = null
+                            if (sId != null) {
+                                lifecycleScope.launch {
+                                    repository.getSourceById(sId)?.let { s ->
+                                        repository.updateSource(s.copy(localPdfPath = uri.toString()))
+                                        currentScreen = Screen.DocumentViewer(
+                                            sourceId = s.id,
+                                            fileUriOrPath = uri.toString(),
+                                            title = s.title,
+                                            projectId = s.projectId
+                                        )
+                                    }
+                                }
+                            } else {
+                                currentScreen = Screen.DocumentViewer(
+                                    sourceId = null,
+                                    fileUriOrPath = uri.toString(),
+                                    title = uri.lastPathSegment ?: "Document",
+                                    projectId = null
+                                )
+                            }
+                        }
+                    }
 
                     val projects by repository.getAllProjects().collectAsState(initial = emptyList())
                     val inboxItems by repository.getAllInboxItems().collectAsState(initial = emptyList())
@@ -83,7 +129,11 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onOpenInbox = { currentScreen = Screen.UniversalInbox },
-                                onOpenDiscovery = { currentScreen = Screen.PaperDiscovery }
+                                onOpenDiscovery = { currentScreen = Screen.PaperDiscovery },
+                                onOpenFile = {
+                                    pendingAttachSourceId = null
+                                    filePickerLauncher.launch(arrayOf("application/pdf", "text/*", "application/json"))
+                                }
                             )
                         }
 
@@ -112,6 +162,18 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onOpenDiscovery = { currentScreen = Screen.PaperDiscovery },
+                                    onOpenDocument = { source ->
+                                        currentScreen = Screen.DocumentViewer(
+                                            sourceId = source.id,
+                                            fileUriOrPath = source.localPdfPath ?: "",
+                                            title = source.title,
+                                            projectId = screen.projectId
+                                        )
+                                    },
+                                    onAttachFile = { sourceId ->
+                                        pendingAttachSourceId = sourceId
+                                        filePickerLauncher.launch(arrayOf("application/pdf", "text/*", "application/json"))
+                                    },
                                     onUpdateReadingStatus = { sourceId, newStatus ->
                                         lifecycleScope.launch {
                                             projectSources.firstOrNull { it.id == sourceId }?.let { s ->
@@ -278,6 +340,35 @@ class MainActivity : ComponentActivity() {
                                             onSuccess = { Toast.makeText(this@MainActivity, "Imported to project!", Toast.LENGTH_SHORT).show() },
                                             onFailure = { Toast.makeText(this@MainActivity, it.message, Toast.LENGTH_LONG).show() }
                                         )
+                                    }
+                                }
+                            )
+                        }
+
+                        is Screen.DocumentViewer -> {
+                            DocumentViewerScreen(
+                                title = screen.title,
+                                fileUriOrPath = screen.fileUriOrPath,
+                                sourceId = screen.sourceId,
+                                projectId = screen.projectId,
+                                onBack = {
+                                    currentScreen = if (screen.projectId != null) {
+                                        Screen.ProjectWorkspace(screen.projectId)
+                                    } else {
+                                        Screen.Dashboard
+                                    }
+                                },
+                                onSaveEvidence = { srcId, pageNum, excerpt, notes, rel ->
+                                    lifecycleScope.launch {
+                                        val ev = Evidence(
+                                            projectId = screen.projectId ?: "",
+                                            sourceId = srcId ?: "",
+                                            location = SourceLocation(pageNumber = pageNum),
+                                            excerptText = excerpt,
+                                            userInterpretation = notes.ifBlank { null },
+                                            relationshipType = rel
+                                        )
+                                        repository.createEvidence(ev)
                                     }
                                 }
                             )

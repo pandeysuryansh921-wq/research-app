@@ -24,7 +24,8 @@ fun DashboardScreen(
     onProjectClick: (String) -> Unit,
     onNewProject: (String, String) -> Unit,
     onOpenInbox: () -> Unit,
-    onOpenDiscovery: () -> Unit
+    onOpenDiscovery: () -> Unit,
+    onOpenFile: () -> Unit = {}
 ) {
     var showNewProjectDialog by remember { mutableStateOf(false) }
     var newTitle by remember { mutableStateOf("") }
@@ -35,6 +36,9 @@ fun DashboardScreen(
             TopAppBar(
                 title = { Text("Research Command Center", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = onOpenFile) {
+                        Icon(Icons.Default.FileOpen, contentDescription = "Open Document (PDF/MD)")
+                    }
                     IconButton(onClick = onOpenDiscovery) {
                         Icon(Icons.Default.Search, contentDescription = "Discover Papers")
                     }
