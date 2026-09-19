@@ -25,7 +25,8 @@ fun DashboardScreen(
     onNewProject: (String, String) -> Unit,
     onOpenInbox: () -> Unit,
     onOpenDiscovery: () -> Unit,
-    onOpenFile: () -> Unit = {}
+    onOpenFile: () -> Unit = {},
+    onOpenSearch: () -> Unit = {}
 ) {
     var showNewProjectDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
@@ -37,6 +38,9 @@ fun DashboardScreen(
             TopAppBar(
                 title = { Text("Research Command Center", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "Universal Cross-Corpus Search")
+                    }
                     IconButton(onClick = { showApiKeyDialog = true }) {
                         Icon(Icons.Default.Key, contentDescription = "AI & API Keys")
                     }
@@ -44,7 +48,7 @@ fun DashboardScreen(
                         Icon(Icons.Default.FileOpen, contentDescription = "Open Document (PDF/MD)")
                     }
                     IconButton(onClick = onOpenDiscovery) {
-                        Icon(Icons.Default.Search, contentDescription = "Discover Papers")
+                        Icon(Icons.Default.TravelExplore, contentDescription = "Discover Papers")
                     }
                     BadgedBox(
                         badge = {

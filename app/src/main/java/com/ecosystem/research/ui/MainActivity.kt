@@ -12,14 +12,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import android.provider.OpenableColumns
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import com.ecosystem.research.core.analytics.EpistemicAuditReport
+import com.ecosystem.research.core.analytics.ResearchGapEngine
 import com.ecosystem.research.core.database.ResearchDatabase
+import com.ecosystem.research.core.document.BatchDocumentImporter
+import com.ecosystem.research.core.document.DocumentImportItem
+import com.ecosystem.research.core.ecosystem.DegreeTrackBridge
 import com.ecosystem.research.core.ecosystem.EcosystemBridge
+import com.ecosystem.research.core.ecosystem.ThesisChapter
 import com.ecosystem.research.core.model.*
 import com.ecosystem.research.core.network.DiscoveryClient
 import com.ecosystem.research.core.repository.ResearchRepository
+import com.ecosystem.research.core.search.SearchFilter
 import com.ecosystem.research.ui.components.ExportManuscriptDialog
+import com.ecosystem.research.ui.components.ResearchGapDialog
 import com.ecosystem.research.ui.screens.*
 import com.ecosystem.research.ui.theme.ResearchTheme
 import kotlinx.coroutines.launch
@@ -39,6 +48,7 @@ sealed class Screen {
     ) : Screen()
     object UniversalInbox : Screen()
     object PaperDiscovery : Screen()
+    data class UniversalSearch(val initialQuery: String? = null, val projectId: String? = null) : Screen()
 }
 
 class MainActivity : ComponentActivity() {
@@ -68,6 +78,39 @@ class MainActivity : ComponentActivity() {
                 ) {
                     var currentScreen by remember { mutableStateOf<Screen>(Screen.Dashboard) }
                     var pendingAttachSourceId by remember { mutableStateOf<String?>(null) }
+                    var pendingBatchProjectId by remember { mutableStateOf<String?>(null) }
+
+                    val batchFilePickerLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.OpenMultipleDocuments()
+                    ) { uris: List<Uri> ->
+                        val projId = pendingBatchProjectId
+                        pendingBatchProjectId = null
+                        if (projId != null && uris.isNotEmpty()) {
+                            val items = uris.map { uri ->
+                                try {
+                                    contentResolver.takePersistableUriPermission(
+                                        uri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    )
+                                } catch (_: Exception) {}
+                                val fileName = queryFileName(uri)
+                                DocumentImportItem(
+                                    uriString = uri.toString(),
+                                    fileName = fileName,
+                                    mimeType = contentResolver.getType(uri)
+                                )
+                            }
+                            val newSources = BatchDocumentImporter.createSourcesFromBatch(projId, items)
+                            lifecycleScope.launch {
+                                var importedCount = 0
+                                for (src in newSources) {
+                                    repository.importSource(src).onSuccess { importedCount++ }
+                                }
+                                Toast.makeText(this@MainActivity, "Batch imported $importedCount documents!", Toast.LENGTH_SHORT).show()
+                                currentScreen = Screen.ProjectWorkspace(projId)
+                            }
+                        }
+                    }
 
                     // Process deep-link navigation if present
                     LaunchedEffect(pendingNavigationTarget) {
@@ -164,7 +207,8 @@ class MainActivity : ComponentActivity() {
                                 onOpenFile = {
                                     pendingAttachSourceId = null
                                     filePickerLauncher.launch(arrayOf("application/pdf", "text/*", "application/json"))
-                                }
+                                },
+                                onOpenSearch = { currentScreen = Screen.UniversalSearch() }
                             )
                         }
 
@@ -174,6 +218,8 @@ class MainActivity : ComponentActivity() {
                                 var projectSources by remember { mutableStateOf<List<Source>>(emptyList()) }
                                 var showSynthesisDialog by remember { mutableStateOf(false) }
                                 var showExportDialog by remember { mutableStateOf(false) }
+                                var showGapDialog by remember { mutableStateOf(false) }
+                                var gapReport by remember { mutableStateOf<EpistemicAuditReport?>(null) }
                                 var workspaceClaims by remember { mutableStateOf<List<Claim>>(emptyList()) }
                                 var workspaceEvidence by remember { mutableStateOf<Map<String, List<Evidence>>>(emptyMap()) }
                                 var workspaceClaimEvidenceMap by remember { mutableStateOf<Map<String, List<Pair<Evidence, Source?>>>>(emptyMap()) }
@@ -272,6 +318,50 @@ class MainActivity : ComponentActivity() {
                                                 onFailure = { Toast.makeText(this@MainActivity, it.message, Toast.LENGTH_LONG).show() }
                                             )
                                         }
+                                    },
+                                    onOpenSearch = {
+                                        currentScreen = Screen.UniversalSearch(projectId = screen.projectId)
+                                    },
+                                    onOpenGapRadar = {
+                                        lifecycleScope.launch {
+                                            val claims = repository.getClaimsByProject(screen.projectId)
+                                            val sources = repository.getSourcesByProject(screen.projectId)
+                                            val evidenceList = repository.getEvidenceByProject(screen.projectId)
+                                            val edges = repository.getGraphEdgesForProject(screen.projectId)
+                                            gapReport = ResearchGapEngine.auditProject(activeProject, claims, sources, evidenceList, edges)
+                                            showGapDialog = true
+                                        }
+                                    },
+                                    onBatchImport = {
+                                        pendingBatchProjectId = screen.projectId
+                                        batchFilePickerLauncher.launch(arrayOf("application/pdf", "text/*", "application/json"))
+                                    },
+                                    onOpenDegreeTrackOutlines = {
+                                        lifecycleScope.launch {
+                                            val claims = repository.getClaimsByProject(screen.projectId)
+                                            val sources = repository.getSourcesByProject(screen.projectId)
+                                            val map = mutableMapOf<String, List<Pair<Evidence, Source?>>>()
+                                            for (c in claims) {
+                                                val evList = repository.getEvidenceForClaim(c.id)
+                                                map[c.id] = evList.map { ev ->
+                                                    val src = sources.find { it.id == ev.sourceId }
+                                                    Pair(ev, src)
+                                                }
+                                            }
+                                            val brief = DegreeTrackBridge.generateChapterBrief(
+                                                activeProject,
+                                                ThesisChapter.CH2_LITERATURE_REVIEW,
+                                                claims,
+                                                map
+                                            )
+                                            currentScreen = Screen.DocumentViewer(
+                                                sourceId = null,
+                                                fileUriOrPath = "thesis_ch2.md",
+                                                title = "${activeProject.title} — Thesis Chapter 2",
+                                                projectId = activeProject.id,
+                                                initialContent = brief
+                                            )
+                                        }
                                     }
                                 )
 
@@ -312,6 +402,13 @@ class MainActivity : ComponentActivity() {
                                                 initialContent = markdown
                                             )
                                         }
+                                    )
+                                }
+
+                                if (showGapDialog && gapReport != null) {
+                                    ResearchGapDialog(
+                                        report = gapReport!!,
+                                        onDismiss = { showGapDialog = false }
                                     )
                                 }
                             } else {
@@ -512,6 +609,46 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+
+                        is Screen.UniversalSearch -> {
+                            UniversalSearchScreen(
+                                projects = projects,
+                                initialProjectId = screen.projectId,
+                                initialQuery = screen.initialQuery,
+                                onBack = {
+                                    currentScreen = if (screen.projectId != null) {
+                                        Screen.ProjectWorkspace(screen.projectId)
+                                    } else {
+                                        Screen.Dashboard
+                                    }
+                                },
+                                onNavigateToSourceDocument = { sourceId, pageNum ->
+                                    lifecycleScope.launch {
+                                        repository.getSourceById(sourceId)?.let { s ->
+                                            if (s.localPdfPath != null) {
+                                                currentScreen = Screen.DocumentViewer(
+                                                    sourceId = s.id,
+                                                    fileUriOrPath = s.localPdfPath,
+                                                    title = s.title,
+                                                    projectId = s.projectId
+                                                )
+                                            } else {
+                                                Toast.makeText(this@MainActivity, "Source has no document attached yet", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                },
+                                onNavigateToClaim = { projId, _ ->
+                                    currentScreen = Screen.EvidenceBoard(projId)
+                                },
+                                onNavigateToProject = { projId ->
+                                    currentScreen = Screen.ProjectWorkspace(projId)
+                                },
+                                onExecuteSearch = { q, filter ->
+                                    repository.searchUniversal(q, filter)
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -592,5 +729,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun queryFileName(uri: Uri): String {
+        var name = uri.lastPathSegment ?: "document"
+        if (uri.scheme == "content") {
+            try {
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0) {
+                            name = cursor.getString(idx) ?: name
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return name
     }
 }

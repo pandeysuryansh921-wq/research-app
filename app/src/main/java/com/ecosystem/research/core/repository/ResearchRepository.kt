@@ -5,6 +5,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import com.ecosystem.research.core.database.ResearchDatabase
 import com.ecosystem.research.core.model.*
+import com.ecosystem.research.core.search.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -394,6 +395,204 @@ class ResearchRepository(
             put("verification_state", cell.verificationState.name)
         }
         db.insertWithOnConflict(ResearchDatabase.TABLE_MATRIX_CELLS, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    suspend fun getAllSources(): List<Source> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<Source>()
+        val db = dbHelper.readableDatabase
+        db.rawQuery("SELECT * FROM ${ResearchDatabase.TABLE_SOURCES} ORDER BY created_at DESC", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(cursorToSource(cursor))
+            }
+        }
+        list
+    }
+
+    suspend fun searchUniversal(
+        query: String,
+        filter: SearchFilter = SearchFilter()
+    ): List<SearchResult> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return@withContext emptyList()
+        val pattern = "%$trimmed%"
+        val results = mutableListOf<SearchResult>()
+        val db = dbHelper.readableDatabase
+
+        // Preload project titles cache
+        val projectTitles = mutableMapOf<String, String>()
+        db.rawQuery("SELECT id, title FROM ${ResearchDatabase.TABLE_PROJECTS}", null).use { c ->
+            while (c.moveToNext()) {
+                projectTitles[c.getString(0)] = c.getString(1)
+            }
+        }
+
+        // 1. Evidence Search
+        if (filter.entityType == SearchEntityType.ALL || filter.entityType == SearchEntityType.EVIDENCE) {
+            val sqlBuilder = StringBuilder("""
+                SELECT e.*, s.title as source_title, s.local_pdf_path
+                FROM ${ResearchDatabase.TABLE_EVIDENCE} e
+                LEFT JOIN ${ResearchDatabase.TABLE_SOURCES} s ON e.source_id = s.id
+                WHERE (e.excerpt_text LIKE ? OR e.user_interpretation LIKE ?)
+            """.trimIndent())
+            val args = mutableListOf(pattern, pattern)
+
+            if (filter.projectId != null) {
+                sqlBuilder.append(" AND e.project_id = ?")
+                args.add(filter.projectId)
+            }
+            if (filter.relationshipType != null) {
+                sqlBuilder.append(" AND e.relationship_type = ?")
+                args.add(filter.relationshipType.name)
+            }
+            sqlBuilder.append(" ORDER BY e.created_at DESC LIMIT 50")
+
+            db.rawQuery(sqlBuilder.toString(), args.toTypedArray()).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val ev = cursorToEvidence(cursor)
+                    val sTitle = if (!cursor.isNull(cursor.getColumnIndexOrThrow("source_title"))) cursor.getString(cursor.getColumnIndexOrThrow("source_title")) else null
+                    val sPath = if (!cursor.isNull(cursor.getColumnIndexOrThrow("local_pdf_path"))) cursor.getString(cursor.getColumnIndexOrThrow("local_pdf_path")) else null
+                    val field = if (ev.excerptText.contains(trimmed, ignoreCase = true)) "Excerpt" else "Interpretation"
+                    results.add(
+                        SearchResult(
+                            id = ev.id,
+                            entityType = SearchEntityType.EVIDENCE,
+                            title = sTitle ?: "Evidence Excerpt",
+                            snippet = ev.excerptText,
+                            matchedField = field,
+                            projectId = ev.projectId,
+                            projectName = projectTitles[ev.projectId],
+                            sourceId = ev.sourceId,
+                            sourceTitle = sTitle,
+                            pageNumber = ev.location.pageNumber,
+                            localFilePath = sPath,
+                            verificationState = ev.provenance.verificationState,
+                            relationshipType = ev.relationshipType,
+                            timestamp = ev.createdAt
+                        )
+                    )
+                }
+            }
+        }
+
+        // 2. Sources Search
+        if (filter.entityType == SearchEntityType.ALL || filter.entityType == SearchEntityType.SOURCE) {
+            val sqlBuilder = StringBuilder("""
+                SELECT * FROM ${ResearchDatabase.TABLE_SOURCES}
+                WHERE (title LIKE ? OR abstract_text LIKE ? OR authors_json LIKE ? OR journal LIKE ? OR doi LIKE ?)
+            """.trimIndent())
+            val args = mutableListOf(pattern, pattern, pattern, pattern, pattern)
+
+            if (filter.projectId != null) {
+                sqlBuilder.append(" AND project_id = ?")
+                args.add(filter.projectId)
+            }
+            sqlBuilder.append(" ORDER BY created_at DESC LIMIT 50")
+
+            db.rawQuery(sqlBuilder.toString(), args.toTypedArray()).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val s = cursorToSource(cursor)
+                    val matchedField = when {
+                        s.title.contains(trimmed, ignoreCase = true) -> "Title"
+                        s.abstractText?.contains(trimmed, ignoreCase = true) == true -> "Abstract"
+                        s.authors.any { it.contains(trimmed, ignoreCase = true) } -> "Author"
+                        s.journal?.contains(trimmed, ignoreCase = true) == true -> "Journal"
+                        s.externalIds.doi?.contains(trimmed, ignoreCase = true) == true -> "DOI"
+                        else -> "Metadata"
+                    }
+                    val snippet = s.abstractText?.take(160) ?: s.authors.joinToString(", ")
+                    results.add(
+                        SearchResult(
+                            id = s.id,
+                            entityType = SearchEntityType.SOURCE,
+                            title = s.title,
+                            snippet = snippet,
+                            matchedField = matchedField,
+                            projectId = s.projectId,
+                            projectName = s.projectId?.let { projectTitles[it] },
+                            sourceId = s.id,
+                            sourceTitle = s.title,
+                            localFilePath = s.localPdfPath,
+                            verificationState = s.provenance.verificationState,
+                            timestamp = s.createdAt
+                        )
+                    )
+                }
+            }
+        }
+
+        // 3. Claims Search
+        if (filter.entityType == SearchEntityType.ALL || filter.entityType == SearchEntityType.CLAIM) {
+            val sqlBuilder = StringBuilder("""
+                SELECT * FROM ${ResearchDatabase.TABLE_CLAIMS}
+                WHERE (proposition LIKE ? OR notes LIKE ?)
+            """.trimIndent())
+            val args = mutableListOf(pattern, pattern)
+
+            if (filter.projectId != null) {
+                sqlBuilder.append(" AND project_id = ?")
+                args.add(filter.projectId)
+            }
+            sqlBuilder.append(" ORDER BY updated_at DESC LIMIT 50")
+
+            db.rawQuery(sqlBuilder.toString(), args.toTypedArray()).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val c = cursorToClaim(cursor)
+                    val matchedField = if (c.proposition.contains(trimmed, ignoreCase = true)) "Proposition" else "Notes"
+                    results.add(
+                        SearchResult(
+                            id = c.id,
+                            entityType = SearchEntityType.CLAIM,
+                            title = c.proposition,
+                            snippet = c.notes ?: "Status: ${c.status.name}",
+                            matchedField = matchedField,
+                            projectId = c.projectId,
+                            projectName = projectTitles[c.projectId],
+                            verificationState = c.provenance.verificationState,
+                            timestamp = c.updatedAt
+                        )
+                    )
+                }
+            }
+        }
+
+        // 4. Inbox Search
+        if (filter.entityType == SearchEntityType.ALL || filter.entityType == SearchEntityType.INBOX) {
+            val sqlBuilder = StringBuilder("""
+                SELECT * FROM ${ResearchDatabase.TABLE_INBOX_ITEMS}
+                WHERE (raw_content LIKE ? OR note LIKE ?)
+            """.trimIndent())
+            val args = mutableListOf(pattern, pattern)
+
+            if (filter.projectId != null) {
+                sqlBuilder.append(" AND (assigned_project_id = ? OR assigned_project_id IS NULL)")
+                args.add(filter.projectId)
+            }
+            sqlBuilder.append(" ORDER BY created_at DESC LIMIT 50")
+
+            db.rawQuery(sqlBuilder.toString(), args.toTypedArray()).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val item = cursorToInboxItem(cursor)
+                    results.add(
+                        SearchResult(
+                            id = item.id,
+                            entityType = SearchEntityType.INBOX,
+                            title = "[${item.sourceApp.uppercase()}] ${item.rawType.name}",
+                            snippet = item.rawContent.take(160),
+                            matchedField = "Inbox Content",
+                            projectId = item.assignedProjectId,
+                            projectName = item.assignedProjectId?.let { projectTitles[it] },
+                            timestamp = item.createdAt
+                        )
+                    )
+                }
+            }
+        }
+
+        // Sort: title/exact matches first, then by timestamp descending
+        results.sortedWith(
+            compareByDescending<SearchResult> { it.title.contains(trimmed, ignoreCase = true) }
+                .thenByDescending { it.timestamp }
+        )
     }
 
     // Helper mappers

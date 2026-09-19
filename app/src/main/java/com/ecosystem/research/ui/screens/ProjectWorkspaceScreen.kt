@@ -36,7 +36,11 @@ fun ProjectWorkspaceScreen(
     onAttachFile: (String) -> Unit,
     onSynthesizeReview: () -> Unit,
     onUpdateReadingStatus: (String, ReadingStatus) -> Unit,
-    onAddPaperManually: (String, String?, Int?, String?) -> Unit
+    onAddPaperManually: (String, String?, Int?, String?) -> Unit,
+    onOpenSearch: () -> Unit = {},
+    onOpenGapRadar: () -> Unit = {},
+    onBatchImport: () -> Unit = {},
+    onOpenDegreeTrackOutlines: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
@@ -79,6 +83,9 @@ fun ProjectWorkspaceScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "Search Project")
+                    }
                     IconButton(onClick = onSynthesizeReview) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = "Synthesize Review")
                     }
@@ -96,6 +103,30 @@ fun ProjectWorkspaceScreen(
                             expanded = overflowMenuExpanded,
                             onDismissRequest = { overflowMenuExpanded = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Epistemic Gap Radar") },
+                                leadingIcon = { Icon(Icons.Default.Radar, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenGapRadar()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Batch Import Documents (PDF/MD)") },
+                                leadingIcon = { Icon(Icons.Default.DriveFolderUpload, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onBatchImport()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Thesis Chapter Outliner (DegreeTrack)") },
+                                leadingIcon = { Icon(Icons.Default.School, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenDegreeTrackOutlines()
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Discover Online Papers") },
                                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
@@ -165,26 +196,36 @@ fun ProjectWorkspaceScreen(
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    FilledTonalButton(
+                        onClick = onOpenGapRadar,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Radar, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Gap Radar", fontSize = 11.sp)
+                    }
+
                     FilledTonalButton(
                         onClick = onOpenVisualGraph,
                         modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
                     ) {
                         Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Evidence Graph", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Evidence Graph", fontSize = 11.sp)
                     }
 
                     FilledTonalButton(
                         onClick = onExportManuscript,
                         modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
                     ) {
                         Icon(Icons.Default.Publish, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Export to Likhoji", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("To Likhoji", fontSize = 11.sp)
                     }
                 }
             }
