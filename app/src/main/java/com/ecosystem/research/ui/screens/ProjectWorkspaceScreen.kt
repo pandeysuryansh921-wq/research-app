@@ -1,6 +1,7 @@
 package com.ecosystem.research.ui.screens
 
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,8 @@ fun ProjectWorkspaceScreen(
     onOpenEvidenceBoard: () -> Unit,
     onOpenMatrix: () -> Unit,
     onOpenDiscovery: () -> Unit,
+    onOpenVisualGraph: () -> Unit,
+    onExportManuscript: () -> Unit,
     onOpenDocument: (Source) -> Unit,
     onAttachFile: (String) -> Unit,
     onSynthesizeReview: () -> Unit,
@@ -51,6 +54,7 @@ fun ProjectWorkspaceScreen(
     var paperJournal by remember { mutableStateOf("") }
     var paperYear by remember { mutableStateOf("") }
     var paperDoi by remember { mutableStateOf("") }
+    var overflowMenuExpanded by remember { mutableStateOf(false) }
 
     val filteredSources = remember(sources, selectedTab) {
         val status = tabStatuses[selectedTab]
@@ -78,14 +82,45 @@ fun ProjectWorkspaceScreen(
                     IconButton(onClick = onSynthesizeReview) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = "Synthesize Review")
                     }
-                    IconButton(onClick = onOpenDiscovery) {
-                        Icon(Icons.Default.Search, contentDescription = "Discover Papers")
+                    IconButton(onClick = onOpenVisualGraph) {
+                        Icon(Icons.Default.Hub, contentDescription = "Visual Evidence Graph")
                     }
-                    IconButton(onClick = onOpenMatrix) {
-                        Icon(Icons.Default.TableChart, contentDescription = "Evidence Matrix")
+                    IconButton(onClick = onExportManuscript) {
+                        Icon(Icons.Default.Publish, contentDescription = "Export to Likhoji")
                     }
-                    IconButton(onClick = onOpenEvidenceBoard) {
-                        Icon(Icons.Default.AccountTree, contentDescription = "Claim-Evidence Graph")
+                    Box {
+                        IconButton(onClick = { overflowMenuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More Options")
+                        }
+                        DropdownMenu(
+                            expanded = overflowMenuExpanded,
+                            onDismissRequest = { overflowMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Discover Online Papers") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenDiscovery()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Literature Comparison Matrix") },
+                                leadingIcon = { Icon(Icons.Default.TableChart, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenMatrix()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Claim Evidence Board") },
+                                leadingIcon = { Icon(Icons.Default.AccountTree, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenEvidenceBoard()
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -126,6 +161,34 @@ fun ProjectWorkspaceScreen(
                 }
             }
 
+            // Quick Access Ecosystem Actions Row
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = onOpenVisualGraph,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Evidence Graph", fontSize = 12.sp)
+                    }
+
+                    FilledTonalButton(
+                        onClick = onExportManuscript,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Publish, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export to Likhoji", fontSize = 12.sp)
+                    }
+                }
+            }
+
             // Reading Queue Status Filter Tabs
             item {
                 ScrollableTabRow(
@@ -162,6 +225,18 @@ fun ProjectWorkspaceScreen(
                         onAttachFile = { onAttachFile(source.id) },
                         onStatusChange = { newStatus ->
                             onUpdateReadingStatus(source.id, newStatus)
+                        },
+                        onPushToProductivity = {
+                            val success = EcosystemBridge.createReadingTaskInProductivity(
+                                context = context,
+                                sourceTitle = source.title,
+                                sourceId = source.id
+                            )
+                            if (success) {
+                                Toast.makeText(context, "Reading task sent to Productivity!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Could not open Productivity app.", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     )
                 }
@@ -238,7 +313,8 @@ private fun SourceCard(
     source: Source,
     onOpenDocument: () -> Unit,
     onAttachFile: () -> Unit,
-    onStatusChange: (ReadingStatus) -> Unit
+    onStatusChange: (ReadingStatus) -> Unit,
+    onPushToProductivity: () -> Unit
 ) {
     var expandedMenu by remember { mutableStateOf(false) }
 
@@ -270,6 +346,14 @@ private fun SourceCard(
                             text = { Text(if (source.localPdfPath != null) "Replace Attached File" else "Attach File (PDF/MD)") },
                             onClick = {
                                 onAttachFile()
+                                expandedMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Push to Productivity App") },
+                            leadingIcon = { Icon(Icons.Default.CheckCircle, contentDescription = null) },
+                            onClick = {
+                                onPushToProductivity()
                                 expandedMenu = false
                             }
                         )

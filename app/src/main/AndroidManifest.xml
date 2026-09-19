@@ -35,6 +35,13 @@
                 <action android:name="com.ecosystem.research.ACTION_VOICE_IDEA" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+
+            <!-- Universal Sharing Intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
         </activity>
 
     </application>

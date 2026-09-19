@@ -1,10 +1,13 @@
 package com.ecosystem.research.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -16,10 +19,8 @@ import com.ecosystem.research.core.ecosystem.EcosystemBridge
 import com.ecosystem.research.core.model.*
 import com.ecosystem.research.core.network.DiscoveryClient
 import com.ecosystem.research.core.repository.ResearchRepository
+import com.ecosystem.research.ui.components.ExportManuscriptDialog
 import com.ecosystem.research.ui.screens.*
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import com.ecosystem.research.ui.theme.ResearchTheme
 import kotlinx.coroutines.launch
 
@@ -28,6 +29,7 @@ sealed class Screen {
     data class ProjectWorkspace(val projectId: String) : Screen()
     data class EvidenceBoard(val projectId: String) : Screen()
     data class EvidenceMatrixView(val projectId: String, val matrixId: String) : Screen()
+    data class VisualEvidenceGraph(val projectId: String) : Screen()
     data class DocumentViewer(
         val sourceId: String?,
         val fileUriOrPath: String,
@@ -43,6 +45,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var repository: ResearchRepository
     private val discoveryClient = DiscoveryClient()
+    private var pendingNavigationTarget by mutableStateOf<DeepLinkTarget?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +68,34 @@ class MainActivity : ComponentActivity() {
                 ) {
                     var currentScreen by remember { mutableStateOf<Screen>(Screen.Dashboard) }
                     var pendingAttachSourceId by remember { mutableStateOf<String?>(null) }
+
+                    // Process deep-link navigation if present
+                    LaunchedEffect(pendingNavigationTarget) {
+                        when (val target = pendingNavigationTarget) {
+                            is DeepLinkTarget.Project -> {
+                                currentScreen = Screen.ProjectWorkspace(target.projectId)
+                                pendingNavigationTarget = null
+                            }
+                            is DeepLinkTarget.Source -> {
+                                val src = repository.getSourceById(target.sourceId)
+                                if (src != null && src.localPdfPath != null) {
+                                    currentScreen = Screen.DocumentViewer(
+                                        sourceId = src.id,
+                                        fileUriOrPath = src.localPdfPath,
+                                        title = src.title,
+                                        projectId = src.projectId
+                                    )
+                                } else if (src?.projectId != null) {
+                                    currentScreen = Screen.ProjectWorkspace(src.projectId)
+                                }
+                                pendingNavigationTarget = null
+                            }
+                            is DeepLinkTarget.Claim -> {
+                                pendingNavigationTarget = null
+                            }
+                            else -> {}
+                        }
+                    }
 
                     val filePickerLauncher = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.OpenDocument()
@@ -121,7 +152,6 @@ class MainActivity : ComponentActivity() {
                                             primaryQuestion = question.ifBlank { null }
                                         )
                                         repository.saveProject(newProj)
-                                        // Create default evidence matrix for this project
                                         val matrix = EvidenceMatrix(
                                             projectId = newProj.id,
                                             title = "$title — Evidence Matrix"
@@ -143,8 +173,11 @@ class MainActivity : ComponentActivity() {
                             if (activeProject != null) {
                                 var projectSources by remember { mutableStateOf<List<Source>>(emptyList()) }
                                 var showSynthesisDialog by remember { mutableStateOf(false) }
+                                var showExportDialog by remember { mutableStateOf(false) }
                                 var workspaceClaims by remember { mutableStateOf<List<Claim>>(emptyList()) }
                                 var workspaceEvidence by remember { mutableStateOf<Map<String, List<Evidence>>>(emptyMap()) }
+                                var workspaceClaimEvidenceMap by remember { mutableStateOf<Map<String, List<Pair<Evidence, Source?>>>>(emptyMap()) }
+                                var currentSynthesisReport by remember { mutableStateOf<String?>(null) }
 
                                 LaunchedEffect(screen.projectId) {
                                     projectSources = repository.getSourcesByProject(screen.projectId)
@@ -167,6 +200,26 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onOpenDiscovery = { currentScreen = Screen.PaperDiscovery },
+                                    onOpenVisualGraph = {
+                                        currentScreen = Screen.VisualEvidenceGraph(screen.projectId)
+                                    },
+                                    onExportManuscript = {
+                                        lifecycleScope.launch {
+                                            val claims = repository.getClaimsByProject(screen.projectId)
+                                            val sources = repository.getSourcesByProject(screen.projectId)
+                                            val map = mutableMapOf<String, List<Pair<Evidence, Source?>>>()
+                                            for (c in claims) {
+                                                val evList = repository.getEvidenceForClaim(c.id)
+                                                map[c.id] = evList.map { ev ->
+                                                    val src = sources.find { it.id == ev.sourceId }
+                                                    Pair(ev, src)
+                                                }
+                                            }
+                                            workspaceClaims = claims
+                                            workspaceClaimEvidenceMap = map
+                                            showExportDialog = true
+                                        }
+                                    },
                                     onOpenDocument = { source ->
                                         currentScreen = Screen.DocumentViewer(
                                             sourceId = source.id,
@@ -230,6 +283,7 @@ class MainActivity : ComponentActivity() {
                                         onDismiss = { showSynthesisDialog = false },
                                         onSynthesisReady = { markdown ->
                                             showSynthesisDialog = false
+                                            currentSynthesisReport = markdown
                                             currentScreen = Screen.DocumentViewer(
                                                 sourceId = null,
                                                 fileUriOrPath = "synthesis.md",
@@ -240,9 +294,55 @@ class MainActivity : ComponentActivity() {
                                         }
                                     )
                                 }
+
+                                if (showExportDialog) {
+                                    ExportManuscriptDialog(
+                                        project = activeProject,
+                                        claims = workspaceClaims,
+                                        claimEvidenceMap = workspaceClaimEvidenceMap,
+                                        sources = projectSources,
+                                        synthesisReport = currentSynthesisReport,
+                                        onDismiss = { showExportDialog = false },
+                                        onOpenInViewer = { markdown ->
+                                            currentScreen = Screen.DocumentViewer(
+                                                sourceId = null,
+                                                fileUriOrPath = "manuscript.md",
+                                                title = "${activeProject.title} — Manuscript",
+                                                projectId = activeProject.id,
+                                                initialContent = markdown
+                                            )
+                                        }
+                                    )
+                                }
                             } else {
                                 currentScreen = Screen.Dashboard
                             }
+                        }
+
+                        is Screen.VisualEvidenceGraph -> {
+                            VisualEvidenceGraphScreen(
+                                projectId = screen.projectId,
+                                repository = repository,
+                                onNavigateBack = {
+                                    currentScreen = Screen.ProjectWorkspace(screen.projectId)
+                                },
+                                onNavigateToSource = { sourceId ->
+                                    lifecycleScope.launch {
+                                        repository.getSourceById(sourceId)?.let { s ->
+                                            if (s.localPdfPath != null) {
+                                                currentScreen = Screen.DocumentViewer(
+                                                    sourceId = s.id,
+                                                    fileUriOrPath = s.localPdfPath,
+                                                    title = s.title,
+                                                    projectId = screen.projectId
+                                                )
+                                            } else {
+                                                Toast.makeText(this@MainActivity, "No document attached to this source yet", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            )
                         }
 
                         is Screen.EvidenceBoard -> {
@@ -453,16 +553,33 @@ class MainActivity : ComponentActivity() {
             EcosystemBridge.ACTION_VOICE_IDEA -> {
                 val voicePrompt = intent.getStringExtra("voice_prompt") ?: intent.getStringExtra(Intent.EXTRA_TEXT)
                 if (!voicePrompt.isNullOrBlank()) {
+                    val parsed = EcosystemBridge.parseBolojiAudioTranscript(voicePrompt)
                     lifecycleScope.launch {
                         repository.captureInboxItem(
                             InboxItem(
                                 rawType = InboxItemType.VOICE_IDEA,
-                                rawContent = voicePrompt,
+                                rawContent = "${parsed.title}\n\n${parsed.transcript}",
                                 sourceApp = "boloji"
                             )
                         )
                     }
-                    Toast.makeText(this, "Voice idea captured to Research Inbox", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Voice memo captured from Boloji", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            Intent.ACTION_SEND -> {
+                val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                if (!sharedText.isNullOrBlank()) {
+                    lifecycleScope.launch {
+                        repository.captureInboxItem(
+                            InboxItem(
+                                rawType = InboxItemType.TEXT,
+                                rawContent = sharedText,
+                                sourceApp = "share_sheet"
+                            )
+                        )
+                    }
+                    Toast.makeText(this, "Shared text saved to Research Inbox", Toast.LENGTH_SHORT).show()
                 }
             }
 
@@ -470,6 +587,7 @@ class MainActivity : ComponentActivity() {
                 val dataUri = intent.dataString
                 if (dataUri != null) {
                     val target = ResearchContractV1.parseUri(dataUri)
+                    pendingNavigationTarget = target
                     Toast.makeText(this, "Navigating: $target", Toast.LENGTH_SHORT).show()
                 }
             }

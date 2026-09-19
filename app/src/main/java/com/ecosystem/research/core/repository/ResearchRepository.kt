@@ -252,6 +252,44 @@ class ResearchRepository(
         list
     }
 
+    data class GraphEdge(
+        val claimId: String,
+        val evidenceId: String,
+        val sourceId: String,
+        val relationshipType: EvidenceRelationship,
+        val excerptText: String
+    )
+
+    suspend fun getGraphEdgesForProject(projectId: String): List<GraphEdge> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<GraphEdge>()
+        val db = dbHelper.readableDatabase
+        val query = """
+            SELECT edge.claim_id, edge.evidence_id, e.source_id, edge.relationship_type, e.excerpt_text
+            FROM ${ResearchDatabase.TABLE_CLAIM_EVIDENCE_EDGES} edge
+            INNER JOIN ${ResearchDatabase.TABLE_EVIDENCE} e ON edge.evidence_id = e.id
+            WHERE e.project_id = ?
+        """.trimIndent()
+        db.rawQuery(query, arrayOf(projectId)).use { cursor ->
+            while (cursor.moveToNext()) {
+                val rel = try {
+                    EvidenceRelationship.valueOf(cursor.getString(3))
+                } catch (e: Exception) {
+                    EvidenceRelationship.UNDETERMINED
+                }
+                list.add(
+                    GraphEdge(
+                        claimId = cursor.getString(0),
+                        evidenceId = cursor.getString(1),
+                        sourceId = cursor.getString(2),
+                        relationshipType = rel,
+                        excerptText = cursor.getString(4)
+                    )
+                )
+            }
+        }
+        list
+    }
+
     // Inbox
     fun getAllInboxItems(): Flow<List<InboxItem>> = inboxFlow
 

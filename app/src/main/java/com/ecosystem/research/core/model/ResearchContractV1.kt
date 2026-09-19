@@ -1,6 +1,6 @@
 package com.ecosystem.research.core.model
 
-import android.net.Uri
+import java.net.URI
 
 sealed class DeepLinkTarget {
     data class Project(val projectId: String) : DeepLinkTarget()
@@ -33,30 +33,26 @@ object ResearchContractV1 {
 
     fun parseUri(uriString: String): DeepLinkTarget {
         return try {
-            val uri = Uri.parse(uriString)
+            val uri = URI(uriString)
             if (uri.scheme != SCHEME) return DeepLinkTarget.Unknown(uriString)
 
             val host = uri.host ?: return DeepLinkTarget.Unknown(uriString)
-            val pathSegments = uri.pathSegments
+            val path = uri.path?.trimStart('/') ?: return DeepLinkTarget.Unknown(uriString)
+            val id = path.split('/').firstOrNull { it.isNotBlank() } ?: return DeepLinkTarget.Unknown(uriString)
+
+            val queryParams = uri.query?.split('&')?.associate {
+                val parts = it.split('=', limit = 2)
+                parts[0] to (parts.getOrNull(1) ?: "")
+            } ?: emptyMap()
 
             when (host) {
-                HOST_PROJECT -> {
-                    val id = pathSegments.firstOrNull() ?: uri.lastPathSegment
-                    if (id != null) DeepLinkTarget.Project(id) else DeepLinkTarget.Unknown(uriString)
-                }
+                HOST_PROJECT -> DeepLinkTarget.Project(id)
                 HOST_SOURCE -> {
-                    val id = pathSegments.firstOrNull() ?: uri.lastPathSegment
-                    val page = uri.getQueryParameter("page")?.toIntOrNull()
-                    if (id != null) DeepLinkTarget.Source(id, page) else DeepLinkTarget.Unknown(uriString)
+                    val page = queryParams["page"]?.toIntOrNull()
+                    DeepLinkTarget.Source(id, page)
                 }
-                HOST_CLAIM -> {
-                    val id = pathSegments.firstOrNull() ?: uri.lastPathSegment
-                    if (id != null) DeepLinkTarget.Claim(id) else DeepLinkTarget.Unknown(uriString)
-                }
-                HOST_EVIDENCE -> {
-                    val id = pathSegments.firstOrNull() ?: uri.lastPathSegment
-                    if (id != null) DeepLinkTarget.Evidence(id) else DeepLinkTarget.Unknown(uriString)
-                }
+                HOST_CLAIM -> DeepLinkTarget.Claim(id)
+                HOST_EVIDENCE -> DeepLinkTarget.Evidence(id)
                 else -> DeepLinkTarget.Unknown(uriString)
             }
         } catch (e: Exception) {
