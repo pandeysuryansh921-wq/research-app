@@ -9,14 +9,19 @@ A local-first evidence, discovery, synthesis, and research-management layer for 
 
 ## 📥 Direct APK Download & Artifacts
 
-- **[GitHub Actions Latest Artifacts](https://github.com/pandeysuryansh921-wq/research-app/actions)** (Download `ResearchApp-Debug-APK` ZIP directly from the latest workflow run)
-- **[GitHub Releases Page](https://github.com/pandeysuryansh921-wq/research-app/releases)**
+- **[Download Latest APK from GitHub Releases](https://github.com/pandeysuryansh921-wq/research-app/releases)** (Instant one-click `.apk` download)
+- **[Download Feature & Architecture PDF Guide](https://github.com/pandeysuryansh921-wq/research-app/releases/download/v1.0.1/Research_App_Features_and_Architecture_Detailed.pdf)**
+- **[GitHub Actions Latest Artifacts](https://github.com/pandeysuryansh921-wq/research-app/actions)** (Download `ResearchApp-Debug-APK` ZIP directly from workflow runs)
+
+### Local Copies on this Machine:
+- `C:\Users\pande\OneDrive\Documents\ResearchApp-debug.apk`
+- `C:\Users\pande\OneDrive\Documents\Research_App_Features_and_Architecture_Detailed.pdf`
 
 ### Installing on Android Device / Tablet:
 ```bash
 adb install -r app-debug.apk
 ```
-*Or download/transfer `app-debug.apk` directly to your phone/tablet and tap to install.*
+*Or copy `ResearchApp-debug.apk` to your phone/tablet and tap to install.*
 
 ## 🎯 Core Product Principle
 
