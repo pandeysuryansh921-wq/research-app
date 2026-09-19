@@ -31,6 +31,7 @@ fun ProjectWorkspaceScreen(
     onOpenDiscovery: () -> Unit,
     onOpenDocument: (Source) -> Unit,
     onAttachFile: (String) -> Unit,
+    onSynthesizeReview: () -> Unit,
     onUpdateReadingStatus: (String, ReadingStatus) -> Unit,
     onAddPaperManually: (String, String?, Int?, String?) -> Unit
 ) {
@@ -74,6 +75,9 @@ fun ProjectWorkspaceScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onSynthesizeReview) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "Synthesize Review")
+                    }
                     IconButton(onClick = onOpenDiscovery) {
                         Icon(Icons.Default.Search, contentDescription = "Discover Papers")
                     }

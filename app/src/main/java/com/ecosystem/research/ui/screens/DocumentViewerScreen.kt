@@ -48,6 +48,7 @@ fun DocumentViewerScreen(
     fileUriOrPath: String,
     sourceId: String? = null,
     projectId: String? = null,
+    initialContent: String? = null,
     onBack: () -> Unit,
     onSaveEvidence: (sourceId: String?, pageNumber: Int, excerpt: String, notes: String, relationship: EvidenceRelationship) -> Unit
 ) {
@@ -55,7 +56,8 @@ fun DocumentViewerScreen(
     val scope = rememberCoroutineScope()
 
     // Determine format
-    val format = remember(fileUriOrPath) {
+    val format = remember(fileUriOrPath, initialContent) {
+        if (initialContent != null) return@remember DocumentFormat.MARKDOWN
         val lower = fileUriOrPath.lowercase()
         when {
             lower.endsWith(".pdf") || fileUriOrPath.contains("pdf", ignoreCase = true) -> DocumentFormat.PDF
@@ -117,22 +119,27 @@ fun DocumentViewerScreen(
                 )
             }
             DocumentFormat.MARKDOWN, DocumentFormat.TEXT -> {
-                isLoadingText = true
-                val loaded = withContext(Dispatchers.IO) {
-                    try {
-                        if (fileUriOrPath.startsWith("content://")) {
-                            val uri = Uri.parse(fileUriOrPath)
-                            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
-                        } else {
-                            val file = File(fileUriOrPath)
-                            if (file.exists()) file.readText() else "File not found: $fileUriOrPath"
+                if (initialContent != null) {
+                    textContent = initialContent
+                    isLoadingText = false
+                } else {
+                    isLoadingText = true
+                    val loaded = withContext(Dispatchers.IO) {
+                        try {
+                            if (fileUriOrPath.startsWith("content://")) {
+                                val uri = Uri.parse(fileUriOrPath)
+                                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                            } else {
+                                val file = File(fileUriOrPath)
+                                if (file.exists()) file.readText() else "File not found: $fileUriOrPath"
+                            }
+                        } catch (e: Exception) {
+                            "Error reading document: ${e.message}"
                         }
-                    } catch (e: Exception) {
-                        "Error reading document: ${e.message}"
                     }
+                    textContent = loaded
+                    isLoadingText = false
                 }
-                textContent = loaded
-                isLoadingText = false
             }
         }
     }

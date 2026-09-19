@@ -28,6 +28,7 @@ fun DashboardScreen(
     onOpenFile: () -> Unit = {}
 ) {
     var showNewProjectDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
     var newTitle by remember { mutableStateOf("") }
     var newQuestion by remember { mutableStateOf("") }
 
@@ -36,6 +37,9 @@ fun DashboardScreen(
             TopAppBar(
                 title = { Text("Research Command Center", fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = { showApiKeyDialog = true }) {
+                        Icon(Icons.Default.Key, contentDescription = "AI & API Keys")
+                    }
                     IconButton(onClick = onOpenFile) {
                         Icon(Icons.Default.FileOpen, contentDescription = "Open Document (PDF/MD)")
                     }
@@ -181,6 +185,12 @@ fun DashboardScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    if (showApiKeyDialog) {
+        com.ecosystem.research.ui.components.ApiKeySettingsDialog(
+            onDismiss = { showApiKeyDialog = false }
         )
     }
 }

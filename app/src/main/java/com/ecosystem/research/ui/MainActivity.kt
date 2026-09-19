@@ -32,7 +32,8 @@ sealed class Screen {
         val sourceId: String?,
         val fileUriOrPath: String,
         val title: String,
-        val projectId: String?
+        val projectId: String?,
+        val initialContent: String? = null
     ) : Screen()
     object UniversalInbox : Screen()
     object PaperDiscovery : Screen()
@@ -141,6 +142,10 @@ class MainActivity : ComponentActivity() {
                             val activeProject = projects.firstOrNull { it.id == screen.projectId }
                             if (activeProject != null) {
                                 var projectSources by remember { mutableStateOf<List<Source>>(emptyList()) }
+                                var showSynthesisDialog by remember { mutableStateOf(false) }
+                                var workspaceClaims by remember { mutableStateOf<List<Claim>>(emptyList()) }
+                                var workspaceEvidence by remember { mutableStateOf<Map<String, List<Evidence>>>(emptyMap()) }
+
                                 LaunchedEffect(screen.projectId) {
                                     projectSources = repository.getSourcesByProject(screen.projectId)
                                 }
@@ -174,6 +179,20 @@ class MainActivity : ComponentActivity() {
                                         pendingAttachSourceId = sourceId
                                         filePickerLauncher.launch(arrayOf("application/pdf", "text/*", "application/json"))
                                     },
+                                    onSynthesizeReview = {
+                                        lifecycleScope.launch {
+                                            val claims = repository.getClaimsByProject(screen.projectId)
+                                            val evList = repository.getEvidenceByProject(screen.projectId)
+                                            val evMap = mutableMapOf<String, List<Evidence>>()
+                                            for (c in claims) {
+                                                val linked = repository.getEvidenceForClaim(c.id)
+                                                evMap[c.id] = if (linked.isNotEmpty()) linked else evList
+                                            }
+                                            workspaceClaims = claims
+                                            workspaceEvidence = evMap
+                                            showSynthesisDialog = true
+                                        }
+                                    },
                                     onUpdateReadingStatus = { sourceId, newStatus ->
                                         lifecycleScope.launch {
                                             projectSources.firstOrNull { it.id == sourceId }?.let { s ->
@@ -202,6 +221,25 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 )
+
+                                if (showSynthesisDialog) {
+                                    GroundedSynthesisDialog(
+                                        project = activeProject,
+                                        claims = workspaceClaims,
+                                        evidenceMap = workspaceEvidence,
+                                        onDismiss = { showSynthesisDialog = false },
+                                        onSynthesisReady = { markdown ->
+                                            showSynthesisDialog = false
+                                            currentScreen = Screen.DocumentViewer(
+                                                sourceId = null,
+                                                fileUriOrPath = "synthesis.md",
+                                                title = "${activeProject.title} — Literature Review",
+                                                projectId = activeProject.id,
+                                                initialContent = markdown
+                                            )
+                                        }
+                                    )
+                                }
                             } else {
                                 currentScreen = Screen.Dashboard
                             }
@@ -351,6 +389,7 @@ class MainActivity : ComponentActivity() {
                                 fileUriOrPath = screen.fileUriOrPath,
                                 sourceId = screen.sourceId,
                                 projectId = screen.projectId,
+                                initialContent = screen.initialContent,
                                 onBack = {
                                     currentScreen = if (screen.projectId != null) {
                                         Screen.ProjectWorkspace(screen.projectId)

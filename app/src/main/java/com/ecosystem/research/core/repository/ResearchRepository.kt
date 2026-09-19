@@ -235,6 +235,23 @@ class ResearchRepository(
         db.insertWithOnConflict(ResearchDatabase.TABLE_CLAIM_EVIDENCE_EDGES, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
+    suspend fun getEvidenceForClaim(claimId: String): List<Evidence> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<Evidence>()
+        val db = dbHelper.readableDatabase
+        val query = """
+            SELECT e.* FROM ${ResearchDatabase.TABLE_EVIDENCE} e
+            INNER JOIN ${ResearchDatabase.TABLE_CLAIM_EVIDENCE_EDGES} edge ON e.id = edge.evidence_id
+            WHERE edge.claim_id = ?
+            ORDER BY e.created_at DESC
+        """.trimIndent()
+        db.rawQuery(query, arrayOf(claimId)).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(cursorToEvidence(cursor))
+            }
+        }
+        list
+    }
+
     // Inbox
     fun getAllInboxItems(): Flow<List<InboxItem>> = inboxFlow
 
