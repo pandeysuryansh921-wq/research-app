@@ -1,9 +1,11 @@
 package com.ecosystem.research.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ecosystem.research.core.model.ProjectStatus
 import com.ecosystem.research.core.model.ResearchProject
 
@@ -22,7 +25,7 @@ fun DashboardScreen(
     projects: List<ResearchProject>,
     pendingInboxCount: Int,
     onProjectClick: (String) -> Unit,
-    onNewProject: (String, String) -> Unit,
+    onNewProject: (String, String, com.ecosystem.research.core.model.Discipline) -> Unit,
     onOpenInbox: () -> Unit,
     onOpenDiscovery: () -> Unit,
     onOpenFile: () -> Unit = {},
@@ -32,6 +35,7 @@ fun DashboardScreen(
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var newTitle by remember { mutableStateOf("") }
     var newQuestion by remember { mutableStateOf("") }
+    var selectedDiscipline by remember { mutableStateOf(com.ecosystem.research.core.model.Discipline.MEDICAL) }
 
     Scaffold(
         topBar = {
@@ -168,15 +172,44 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2
                     )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Discipline & Inquiry Framework:",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        com.ecosystem.research.core.model.Discipline.values().forEach { disc ->
+                            val label = when (disc) {
+                                com.ecosystem.research.core.model.Discipline.MEDICAL -> "Medical (PICO)"
+                                com.ecosystem.research.core.model.Discipline.CS -> "CS (Benchmark)"
+                                com.ecosystem.research.core.model.Discipline.BIOINFORMATICS -> "Bioinformatics (Genomics)"
+                                com.ecosystem.research.core.model.Discipline.SOCIAL_SCIENCE -> "Social Science"
+                                com.ecosystem.research.core.model.Discipline.ENGINEERING -> "Engineering"
+                            }
+                            FilterChip(
+                                selected = selectedDiscipline == disc,
+                                onClick = { selectedDiscipline = disc },
+                                label = { Text(label, fontSize = 11.sp) }
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (newTitle.isNotBlank()) {
-                            onNewProject(newTitle.trim(), newQuestion.trim())
+                            onNewProject(newTitle.trim(), newQuestion.trim(), selectedDiscipline)
                             newTitle = ""
                             newQuestion = ""
+                            selectedDiscipline = com.ecosystem.research.core.model.Discipline.MEDICAL
                             showNewProjectDialog = false
                         }
                     }

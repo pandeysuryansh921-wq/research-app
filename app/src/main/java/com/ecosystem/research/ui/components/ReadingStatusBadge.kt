@@ -38,3 +38,29 @@ fun ReadingStatusBadge(
             .padding(horizontal = 6.dp, vertical = 2.dp)
     )
 }
+
+@Composable
+fun PreprintBadge(
+    isPreprint: Boolean,
+    preprintSource: String? = null,
+    modifier: Modifier = Modifier
+) {
+    if (!isPreprint) return
+
+    val label = if (preprintSource != null) {
+        "⚠️ Preprint ($preprintSource)"
+    } else {
+        "⚠️ Preprint (not peer-reviewed)"
+    }
+
+    Text(
+        text = label,
+        color = Color(0xFF991B1B), // Dark Red
+        fontSize = 11.sp,
+        style = MaterialTheme.typography.labelSmall,
+        modifier = modifier
+            .background(Color(0xFFFEE2E2), RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    )
+}
+

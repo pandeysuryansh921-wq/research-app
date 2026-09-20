@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ecosystem.research.core.model.*
+import com.ecosystem.research.ui.components.StatisticalExportDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,6 +32,7 @@ fun EvidenceMatrixScreen(
     onSaveCell: (MatrixCell) -> Unit
 ) {
     var inspectedCell by remember { mutableStateOf<MatrixCell?>(null) }
+    var showExportDialog by remember { mutableStateOf(false) }
     val horizontalScrollState = rememberScrollState()
 
     Scaffold(
@@ -39,6 +42,11 @@ fun EvidenceMatrixScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showExportDialog = true }) {
+                        Icon(Icons.Default.Analytics, contentDescription = "Export to Statistical Software")
                     }
                 }
             )
@@ -193,6 +201,15 @@ fun EvidenceMatrixScreen(
                     Text("Close")
                 }
             }
+        )
+    }
+
+    if (showExportDialog) {
+        StatisticalExportDialog(
+            matrix = matrix,
+            sources = sources,
+            cells = cells,
+            onDismiss = { showExportDialog = false }
         )
     }
 }

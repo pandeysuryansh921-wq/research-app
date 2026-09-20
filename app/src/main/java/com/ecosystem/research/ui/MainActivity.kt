@@ -27,7 +27,9 @@ import com.ecosystem.research.core.model.*
 import com.ecosystem.research.core.network.DiscoveryClient
 import com.ecosystem.research.core.repository.ResearchRepository
 import com.ecosystem.research.core.search.SearchFilter
+import com.ecosystem.research.ui.components.DualScreeningDialog
 import com.ecosystem.research.ui.components.ExportManuscriptDialog
+import com.ecosystem.research.ui.components.IrbTrackingDialog
 import com.ecosystem.research.ui.components.ResearchGapDialog
 import com.ecosystem.research.ui.screens.*
 import com.ecosystem.research.ui.theme.ResearchTheme
@@ -188,11 +190,12 @@ class MainActivity : ComponentActivity() {
                                 onProjectClick = { projId ->
                                     currentScreen = Screen.ProjectWorkspace(projId)
                                 },
-                                onNewProject = { title, question ->
+                                onNewProject = { title, question, discipline ->
                                     lifecycleScope.launch {
                                         val newProj = ResearchProject(
                                             title = title,
-                                            primaryQuestion = question.ifBlank { null }
+                                            primaryQuestion = question.ifBlank { null },
+                                            discipline = discipline
                                         )
                                         repository.saveProject(newProj)
                                         val matrix = EvidenceMatrix(
@@ -224,6 +227,10 @@ class MainActivity : ComponentActivity() {
                                 var workspaceEvidence by remember { mutableStateOf<Map<String, List<Evidence>>>(emptyMap()) }
                                 var workspaceClaimEvidenceMap by remember { mutableStateOf<Map<String, List<Pair<Evidence, Source?>>>>(emptyMap()) }
                                 var currentSynthesisReport by remember { mutableStateOf<String?>(null) }
+                                var showDualScreeningDialog by remember { mutableStateOf(false) }
+                                var screeningDecisions by remember { mutableStateOf<List<ScreeningDecision>>(emptyList()) }
+                                var showIrbTrackingDialog by remember { mutableStateOf(false) }
+                                var irbProtocols by remember { mutableStateOf<List<IrbProtocol>>(emptyList()) }
 
                                 LaunchedEffect(screen.projectId) {
                                     projectSources = repository.getSourcesByProject(screen.projectId)
@@ -362,6 +369,18 @@ class MainActivity : ComponentActivity() {
                                                 initialContent = brief
                                             )
                                         }
+                                    },
+                                    onOpenDualScreening = {
+                                        lifecycleScope.launch {
+                                            screeningDecisions = repository.getScreeningDecisions("session_${screen.projectId}")
+                                            showDualScreeningDialog = true
+                                        }
+                                    },
+                                    onOpenIrbTracking = {
+                                        lifecycleScope.launch {
+                                            irbProtocols = repository.getIrbProtocols(screen.projectId)
+                                            showIrbTrackingDialog = true
+                                        }
                                     }
                                 )
 
@@ -409,6 +428,47 @@ class MainActivity : ComponentActivity() {
                                     ResearchGapDialog(
                                         report = gapReport!!,
                                         onDismiss = { showGapDialog = false }
+                                    )
+                                }
+
+                                if (showDualScreeningDialog) {
+                                    DualScreeningDialog(
+                                        sources = projectSources,
+                                        decisions = screeningDecisions,
+                                        onSaveDecision = { sourceId, screenerId, vote, reason ->
+                                            lifecycleScope.launch {
+                                                val decision = ScreeningDecision(
+                                                    sessionId = "session_${screen.projectId}",
+                                                    sourceId = sourceId,
+                                                    screenerId = screenerId,
+                                                    decision = vote,
+                                                    exclusionReason = reason
+                                                )
+                                                repository.saveScreeningDecision(decision)
+                                                screeningDecisions = repository.getScreeningDecisions("session_${screen.projectId}")
+                                            }
+                                        },
+                                        onDismiss = { showDualScreeningDialog = false }
+                                    )
+                                }
+
+                                if (showIrbTrackingDialog) {
+                                    IrbTrackingDialog(
+                                        projectId = screen.projectId,
+                                        protocols = irbProtocols,
+                                        onSaveProtocol = { proto ->
+                                            lifecycleScope.launch {
+                                                repository.saveIrbProtocol(proto)
+                                                irbProtocols = repository.getIrbProtocols(screen.projectId)
+                                            }
+                                        },
+                                        onDeleteProtocol = { protoId ->
+                                            lifecycleScope.launch {
+                                                repository.deleteIrbProtocol(protoId)
+                                                irbProtocols = repository.getIrbProtocols(screen.projectId)
+                                            }
+                                        },
+                                        onDismiss = { showIrbTrackingDialog = false }
                                     )
                                 }
                             } else {

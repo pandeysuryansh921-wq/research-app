@@ -19,6 +19,8 @@ data class Evidence(
     val excerptText: String,
     val userInterpretation: String? = null,
     val relationshipType: EvidenceRelationship = EvidenceRelationship.UNDETERMINED,
+    val confidenceScore: Float = 1.0f,
+    val isPreprint: Boolean = false,
     val provenance: ProvenanceRecord = ProvenanceRecord(
         originType = OriginType.DIRECT_EXCERPT,
         verificationState = VerificationState.UNVERIFIED,

@@ -64,6 +64,7 @@ class ResearchRepository(
             put("description", project.description)
             put("primary_question", project.primaryQuestion)
             put("status", project.status.name)
+            put("discipline", project.discipline.name)
             put("tags", project.tags.joinToString(","))
             put("created_at", project.createdAt)
             put("updated_at", project.updatedAt)
@@ -112,6 +113,11 @@ class ResearchRepository(
             }
         }
 
+        // Automatic preprint detection
+        val detection = com.ecosystem.research.core.analytics.PreprintDetector.detect(source)
+        val isPreprint = source.isPreprint || detection.isPreprint
+        val preprintSource = source.preprintSource ?: detection.sourceName
+
         val cv = ContentValues().apply {
             put("id", source.id)
             put("project_id", source.projectId)
@@ -127,6 +133,10 @@ class ResearchRepository(
             put("local_pdf_path", source.localPdfPath)
             put("reading_status", source.readingStatus.name)
             put("study_type", source.studyType.name)
+            put("is_preprint", if (isPreprint) 1 else 0)
+            put("preprint_source", preprintSource)
+            put("peer_reviewed_version_doi", source.peerReviewedVersionDoi)
+            put("discipline", source.discipline.name)
             put("priority", source.priority)
             put("rationale", source.rationale)
             put("origin_type", source.provenance.originType.name)
@@ -199,6 +209,12 @@ class ResearchRepository(
 
     suspend fun createEvidence(evidence: Evidence) = withContext(Dispatchers.IO) {
         val db = dbHelper.writableDatabase
+
+        // Check if underlying source is a preprint to apply 50% confidence haircut
+        val source = getSourceById(evidence.sourceId)
+        val isPreprint = evidence.isPreprint || (source?.isPreprint == true)
+        val confidenceScore = if (isPreprint) evidence.confidenceScore * 0.5f else evidence.confidenceScore
+
         val cv = ContentValues().apply {
             put("id", evidence.id)
             put("project_id", evidence.projectId)
@@ -211,6 +227,8 @@ class ResearchRepository(
             put("excerpt_text", evidence.excerptText)
             put("user_interpretation", evidence.userInterpretation)
             put("relationship_type", evidence.relationshipType.name)
+            put("confidence_score", confidenceScore)
+            put("is_preprint", if (isPreprint) 1 else 0)
             put("origin_type", evidence.provenance.originType.name)
             put("verification_state", evidence.provenance.verificationState.name)
             put("created_by", evidence.provenance.attribution.createdBy)
@@ -608,6 +626,11 @@ class ResearchRepository(
             } catch (e: Exception) {
                 ProjectStatus.ACTIVE
             },
+            discipline = try {
+                Discipline.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("discipline")))
+            } catch (e: Exception) {
+                Discipline.MEDICAL
+            },
             tags = if (tagsStr.isBlank()) emptyList() else tagsStr.split(",").map { it.trim() },
             createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
             updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at"))
@@ -647,6 +670,26 @@ class ResearchRepository(
                 StudyType.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("study_type")))
             } catch (e: Exception) {
                 StudyType.OTHER
+            },
+            isPreprint = try {
+                cursor.getInt(cursor.getColumnIndexOrThrow("is_preprint")) == 1
+            } catch (e: Exception) {
+                false
+            },
+            preprintSource = try {
+                cursor.getString(cursor.getColumnIndexOrThrow("preprint_source"))
+            } catch (e: Exception) {
+                null
+            },
+            peerReviewedVersionDoi = try {
+                cursor.getString(cursor.getColumnIndexOrThrow("peer_reviewed_version_doi"))
+            } catch (e: Exception) {
+                null
+            },
+            discipline = try {
+                Discipline.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("discipline")))
+            } catch (e: Exception) {
+                Discipline.MEDICAL
             },
             priority = cursor.getInt(cursor.getColumnIndexOrThrow("priority")),
             rationale = cursor.getString(cursor.getColumnIndexOrThrow("rationale")),
@@ -729,6 +772,16 @@ class ResearchRepository(
             } catch (e: Exception) {
                 EvidenceRelationship.UNDETERMINED
             },
+            confidenceScore = try {
+                cursor.getFloat(cursor.getColumnIndexOrThrow("confidence_score"))
+            } catch (e: Exception) {
+                1.0f
+            },
+            isPreprint = try {
+                cursor.getInt(cursor.getColumnIndexOrThrow("is_preprint")) == 1
+            } catch (e: Exception) {
+                false
+            },
             provenance = ProvenanceRecord(
                 originType = try {
                     OriginType.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("origin_type")))
@@ -769,6 +822,193 @@ class ResearchRepository(
             },
             note = cursor.getString(cursor.getColumnIndexOrThrow("note")),
             createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at"))
+        )
+    }
+
+    // IRB Tracking (Feature 71)
+    suspend fun getIrbProtocols(projectId: String): List<IrbProtocol> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<IrbProtocol>()
+        val db = dbHelper.readableDatabase
+        db.rawQuery("SELECT * FROM ${ResearchDatabase.TABLE_IRB_TRACKING} WHERE project_id = ? ORDER BY created_at DESC", arrayOf(projectId)).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(cursorToIrbProtocol(cursor))
+            }
+        }
+        list
+    }
+
+    suspend fun saveIrbProtocol(protocol: IrbProtocol) = withContext(Dispatchers.IO) {
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("id", protocol.id)
+            put("project_id", protocol.projectId)
+            put("protocol_number", protocol.protocolNumber)
+            put("institution", protocol.institution)
+            put("title", protocol.title)
+            put("status", protocol.status.name)
+            put("approval_date", protocol.approvalDate)
+            put("expiration_date", protocol.expirationDate)
+            put("protocol_version", protocol.protocolVersion)
+            put("icf_template_path", protocol.icfTemplatePath)
+            put("decision_letter_path", protocol.decisionLetterPath)
+            put("notes", protocol.notes)
+            put("created_at", protocol.createdAt)
+            put("updated_at", protocol.updatedAt)
+        }
+        db.insertWithOnConflict(ResearchDatabase.TABLE_IRB_TRACKING, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    suspend fun deleteIrbProtocol(id: String) = withContext(Dispatchers.IO) {
+        val db = dbHelper.writableDatabase
+        db.delete(ResearchDatabase.TABLE_IRB_TRACKING, "id = ?", arrayOf(id))
+    }
+
+    private fun cursorToIrbProtocol(cursor: Cursor): IrbProtocol {
+        return IrbProtocol(
+            id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
+            projectId = cursor.getString(cursor.getColumnIndexOrThrow("project_id")),
+            protocolNumber = cursor.getString(cursor.getColumnIndexOrThrow("protocol_number")),
+            institution = cursor.getString(cursor.getColumnIndexOrThrow("institution")),
+            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+            status = try {
+                IrbStatus.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("status")))
+            } catch (e: Exception) {
+                IrbStatus.PENDING
+            },
+            approvalDate = if (cursor.isNull(cursor.getColumnIndexOrThrow("approval_date"))) null else cursor.getLong(cursor.getColumnIndexOrThrow("approval_date")),
+            expirationDate = if (cursor.isNull(cursor.getColumnIndexOrThrow("expiration_date"))) null else cursor.getLong(cursor.getColumnIndexOrThrow("expiration_date")),
+            protocolVersion = cursor.getString(cursor.getColumnIndexOrThrow("protocol_version")),
+            icfTemplatePath = cursor.getString(cursor.getColumnIndexOrThrow("icf_template_path")),
+            decisionLetterPath = cursor.getString(cursor.getColumnIndexOrThrow("decision_letter_path")),
+            notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")),
+            createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+            updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at"))
+        )
+    }
+
+    // Dual Screening Workspace (Feature 75)
+    suspend fun getScreeningSessions(projectId: String): List<ScreeningSession> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<ScreeningSession>()
+        val db = dbHelper.readableDatabase
+        db.rawQuery("SELECT * FROM ${ResearchDatabase.TABLE_SCREENING_SESSIONS} WHERE project_id = ? ORDER BY created_at DESC", arrayOf(projectId)).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(cursorToScreeningSession(cursor))
+            }
+        }
+        list
+    }
+
+    suspend fun saveScreeningSession(session: ScreeningSession) = withContext(Dispatchers.IO) {
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("id", session.id)
+            put("project_id", session.projectId)
+            put("title", session.title)
+            put("inclusion_criteria", session.inclusionCriteria)
+            put("exclusion_criteria", session.exclusionCriteria)
+            put("screener1_name", session.screener1Name)
+            put("screener2_name", session.screener2Name)
+            put("arbitrator_name", session.arbitratorName)
+            put("status", session.status.name)
+            put("created_at", session.createdAt)
+        }
+        db.insertWithOnConflict(ResearchDatabase.TABLE_SCREENING_SESSIONS, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    suspend fun getScreeningDecisions(sessionId: String): List<ScreeningDecision> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<ScreeningDecision>()
+        val db = dbHelper.readableDatabase
+        db.rawQuery("SELECT * FROM ${ResearchDatabase.TABLE_SCREENING_DECISIONS} WHERE session_id = ? ORDER BY decided_at ASC", arrayOf(sessionId)).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(cursorToScreeningDecision(cursor))
+            }
+        }
+        list
+    }
+
+    suspend fun saveScreeningDecision(decision: ScreeningDecision) = withContext(Dispatchers.IO) {
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("id", decision.id)
+            put("session_id", decision.sessionId)
+            put("source_id", decision.sourceId)
+            put("screener_id", decision.screenerId)
+            put("decision", decision.decision.name)
+            put("exclusion_reason", decision.exclusionReason)
+            put("notes", decision.notes)
+            put("decided_at", decision.decidedAt)
+        }
+        db.insertWithOnConflict(ResearchDatabase.TABLE_SCREENING_DECISIONS, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    suspend fun getScreeningReliability(sessionId: String): ScreeningReliability? = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        db.rawQuery("SELECT * FROM ${ResearchDatabase.TABLE_SCREENING_RELIABILITY} WHERE session_id = ? LIMIT 1", arrayOf(sessionId)).use { cursor ->
+            if (cursor.moveToFirst()) cursorToScreeningReliability(cursor) else null
+        }
+    }
+
+    suspend fun saveScreeningReliability(reliability: ScreeningReliability) = withContext(Dispatchers.IO) {
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("session_id", reliability.sessionId)
+            put("total_screened", reliability.totalScreened)
+            put("agreed_count", reliability.agreedCount)
+            put("conflicted_count", reliability.conflictedCount)
+            put("percent_agreement", reliability.percentAgreement)
+            put("cohens_kappa", reliability.cohensKappa)
+            put("interpretation", reliability.interpretation)
+            put("calculated_at", reliability.calculatedAt)
+        }
+        db.insertWithOnConflict(ResearchDatabase.TABLE_SCREENING_RELIABILITY, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    private fun cursorToScreeningSession(cursor: Cursor): ScreeningSession {
+        return ScreeningSession(
+            id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
+            projectId = cursor.getString(cursor.getColumnIndexOrThrow("project_id")),
+            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+            inclusionCriteria = cursor.getString(cursor.getColumnIndexOrThrow("inclusion_criteria")) ?: "",
+            exclusionCriteria = cursor.getString(cursor.getColumnIndexOrThrow("exclusion_criteria")) ?: "",
+            screener1Name = cursor.getString(cursor.getColumnIndexOrThrow("screener1_name")),
+            screener2Name = cursor.getString(cursor.getColumnIndexOrThrow("screener2_name")),
+            arbitratorName = cursor.getString(cursor.getColumnIndexOrThrow("arbitrator_name")),
+            status = try {
+                ScreeningSessionStatus.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("status")))
+            } catch (e: Exception) {
+                ScreeningSessionStatus.IN_PROGRESS
+            },
+            createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at"))
+        )
+    }
+
+    private fun cursorToScreeningDecision(cursor: Cursor): ScreeningDecision {
+        return ScreeningDecision(
+            id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
+            sessionId = cursor.getString(cursor.getColumnIndexOrThrow("session_id")),
+            sourceId = cursor.getString(cursor.getColumnIndexOrThrow("source_id")),
+            screenerId = cursor.getString(cursor.getColumnIndexOrThrow("screener_id")),
+            decision = try {
+                ScreeningVote.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("decision")))
+            } catch (e: Exception) {
+                ScreeningVote.UNSURE
+            },
+            exclusionReason = cursor.getString(cursor.getColumnIndexOrThrow("exclusion_reason")),
+            notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")),
+            decidedAt = cursor.getLong(cursor.getColumnIndexOrThrow("decided_at"))
+        )
+    }
+
+    private fun cursorToScreeningReliability(cursor: Cursor): ScreeningReliability {
+        return ScreeningReliability(
+            sessionId = cursor.getString(cursor.getColumnIndexOrThrow("session_id")),
+            totalScreened = cursor.getInt(cursor.getColumnIndexOrThrow("total_screened")),
+            agreedCount = cursor.getInt(cursor.getColumnIndexOrThrow("agreed_count")),
+            conflictedCount = cursor.getInt(cursor.getColumnIndexOrThrow("conflicted_count")),
+            percentAgreement = cursor.getFloat(cursor.getColumnIndexOrThrow("percent_agreement")),
+            cohensKappa = cursor.getFloat(cursor.getColumnIndexOrThrow("cohens_kappa")),
+            interpretation = cursor.getString(cursor.getColumnIndexOrThrow("interpretation")),
+            calculatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("calculated_at"))
         )
     }
 }

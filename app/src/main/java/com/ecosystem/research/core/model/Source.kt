@@ -37,6 +37,10 @@ data class Source(
     val localPdfPath: String? = null,
     val readingStatus: ReadingStatus = ReadingStatus.INBOX,
     val studyType: StudyType = StudyType.OTHER,
+    val isPreprint: Boolean = false,
+    val preprintSource: String? = null,
+    val peerReviewedVersionDoi: String? = null,
+    val discipline: Discipline = Discipline.MEDICAL,
     val priority: Int = 0,
     val rationale: String? = null,
     val provenance: ProvenanceRecord = ProvenanceRecord(

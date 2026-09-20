@@ -15,6 +15,7 @@ data class ResearchProject(
     val description: String? = null,
     val primaryQuestion: String? = null,
     val status: ProjectStatus = ProjectStatus.ACTIVE,
+    val discipline: Discipline = Discipline.MEDICAL,
     val tags: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()

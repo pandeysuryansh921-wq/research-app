@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ecosystem.research.core.ecosystem.EcosystemBridge
 import com.ecosystem.research.core.model.*
+import com.ecosystem.research.ui.components.PreprintBadge
 import com.ecosystem.research.ui.components.ProvenanceBadge
 import com.ecosystem.research.ui.components.ReadingStatusBadge
 
@@ -40,7 +41,9 @@ fun ProjectWorkspaceScreen(
     onOpenSearch: () -> Unit = {},
     onOpenGapRadar: () -> Unit = {},
     onBatchImport: () -> Unit = {},
-    onOpenDegreeTrackOutlines: () -> Unit = {}
+    onOpenDegreeTrackOutlines: () -> Unit = {},
+    onOpenDualScreening: () -> Unit = {},
+    onOpenIrbTracking: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
@@ -149,6 +152,23 @@ fun ProjectWorkspaceScreen(
                                 onClick = {
                                     overflowMenuExpanded = false
                                     onOpenEvidenceBoard()
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Dual Independent Screening (Cohen's κ)") },
+                                leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenDualScreening()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("IRB & Ethics Protocol Tracking") },
+                                leadingIcon = { Icon(Icons.Default.VerifiedUser, contentDescription = null) },
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    onOpenIrbTracking()
                                 }
                             )
                         }
@@ -444,6 +464,9 @@ private fun SourceCard(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ReadingStatusBadge(status = source.readingStatus)
+                    if (source.isPreprint) {
+                        PreprintBadge(isPreprint = true, preprintSource = source.preprintSource)
+                    }
                     ProvenanceBadge(provenance = source.provenance)
                 }
 

@@ -113,6 +113,26 @@ object ResearchGapEngine {
         // 5. Calculate Quantitative Epistemic Health Score (0 - 100)
         var score = 100
 
+        // Check for preprint-backed claims
+        val sourcesById = projectSources.associateBy { it.id }
+        val evidenceById = projectEvidence.associateBy { it.id }
+        val preprintOnlyClaims = mutableListOf<Claim>()
+
+        for (claim in projectClaims) {
+            val linked = edgesByClaim[claim.id] ?: emptyList()
+            val supporting = linked.filter { it.relationshipType == EvidenceRelationship.SUPPORTS }
+            if (supporting.isNotEmpty()) {
+                val allPreprints = supporting.all { edge ->
+                    val ev = evidenceById[edge.evidenceId]
+                    val src = sourcesById[edge.sourceId]
+                    ev?.isPreprint == true || src?.isPreprint == true
+                }
+                if (allPreprints) {
+                    preprintOnlyClaims.add(claim)
+                }
+            }
+        }
+
         if (projectClaims.isNotEmpty()) {
             val supportedCount = projectClaims.size - unsupportedClaims.size
             val supportRatio = supportedCount.toFloat() / projectClaims.size.toFloat()
@@ -131,6 +151,12 @@ object ResearchGapEngine {
             if (contestedClaims.isNotEmpty()) {
                 val contestedPenalty = (contestedClaims.size * 5).coerceAtMost(15)
                 score -= contestedPenalty
+            }
+
+            // Preprint penalty: claims backed solely by preprints face 50% confidence haircut
+            if (preprintOnlyClaims.isNotEmpty()) {
+                val preprintPenalty = (preprintOnlyClaims.size * 5).coerceAtMost(15)
+                score -= preprintPenalty
             }
         } else {
             // No claims formulated yet
@@ -189,6 +215,17 @@ object ResearchGapEngine {
                     title = "Extract Key Paper Evidence",
                     description = "Key paper \"${paper.title.take(50)}\" is in library but has no evidence quotes extracted yet.",
                     targetSourceId = paper.id
+                )
+            )
+        }
+
+        for (pre in preprintOnlyClaims) {
+            recommendations.add(
+                EpistemicRecommendation(
+                    priority = RecommendationPriority.WARNING,
+                    title = "Preprint-Only Evidence Grounding",
+                    description = "Claim \"${pre.proposition.take(50)}...\" relies entirely on non-peer-reviewed preprint evidence. 50% confidence penalty applied until corroborated.",
+                    targetClaimId = pre.id
                 )
             )
         }
